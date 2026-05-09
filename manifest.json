@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Instant Image Downloader",
+  "version": "1.1.0",
+  "description": "Automatically detects page images, downloads them, zips gallery images, and can step through pages with the left arrow action.",
+  "permissions": ["activeTab", "downloads", "scripting", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Instant Image Downloader",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["contentScript.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

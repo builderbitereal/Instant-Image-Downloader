@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Instant Image Downloader</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="popup">
+      <header class="header">
+        <div>
+          <h1>Image Downloader</h1>
+          <p>Auto detect, download, and move with left arrow.</p>
+        </div>
+      </header>
+
+      <section class="section">
+        <label class="toggle-row">
+          <span>
+            <strong>Instant Download</strong>
+            <small>Download the main detected image on the page.</small>
+          </span>
+          <input id="instantEnabled" type="checkbox">
+        </label>
+      </section>
+
+      <section class="section">
+        <label class="toggle-row">
+          <span>
+            <strong>Left Arrow Option Enabled</strong>
+            <small>Download, move left, then repeat.</small>
+          </span>
+          <input id="leftEnabled" type="checkbox">
+        </label>
+
+        <label class="field">
+          <span>Array click limit</span>
+          <input id="leftLimit" type="number" min="0" step="1" placeholder="0 = unlimited">
+        </label>
+
+        <div class="button-row">
+          <button id="startLeft" type="button">Start</button>
+          <button id="stopLeft" type="button" class="secondary">Stop</button>
+        </div>
+      </section>
+
+      <section class="section">
+        <button id="downloadZip" type="button" class="full">Download All Post Images as ZIP</button>
+        <button id="downloadNow" type="button" class="full">Manual Download Current Image</button>
+        <button id="pickImage" type="button" class="full secondary">Manual Download By Image Click</button>
+      </section>
+
+      <p id="status" class="status">Ready.</p>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
