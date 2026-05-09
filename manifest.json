@@ -1,8 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "Instant Image Downloader",
+  "name": "BuilderBite Instant Image Downloader",
   "version": "1.1.0",
   "description": "Automatically detects page images, downloads them, zips gallery images, and can step through pages with the left arrow action.",
+  "author": "BuilderBite",
+  "homepage_url": "https://builderbite.com/",
   "permissions": ["activeTab", "downloads", "scripting", "storage"],
   "host_permissions": ["<all_urls>"],
   "background": {
