@@ -1,7 +1,7 @@
 const RECENT_DOWNLOADS_KEY = "iidRecentDownloads";
 const MAX_RECENT_DOWNLOADS = 250;
 const DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
-const ZIP_BATCH_LIMIT = 80;
+const ZIP_BATCH_LIMIT = 200;
 
 const crcTable = (() => {
   const table = new Uint32Array(256);

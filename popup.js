@@ -149,32 +149,19 @@ stopLeft.addEventListener("click", async () => {
 });
 
 downloadZip.addEventListener("click", async () => {
-  statusEl.textContent = "Finding post images...";
-  const collected = await sendToActiveTab({ type: "IID_COLLECT_BATCH_IMAGES" });
-
-  if (!collected || !collected.ok || !collected.images || !collected.images.length) {
-    const settings = await getSettings();
-    render({ ...settings, lastStatus: (collected && collected.error) || "No batch images found." });
-    return;
-  }
-
-  statusEl.textContent = `Creating ZIP from ${collected.images.length} images...`;
-
-  const result = await chrome.runtime.sendMessage({
-    type: "IID_DOWNLOAD_ZIP",
-    payload: {
-      images: collected.images,
-      pageUrl: collected.pageUrl,
-      pageTitle: collected.pageTitle
+  downloadZip.disabled = true;
+  statusEl.textContent = "Finding all post photos...";
+  try {
+    const result = await sendToActiveTab({ type: "IID_START_BATCH_ZIP" });
+    if (!result?.ok) {
+      const settings = await getSettings();
+      render({ ...settings, lastStatus: result?.error || "ZIP download failed." });
     }
-  });
-  const settings = await getSettings();
-
-  if (result && result.ok) {
-    const failed = Number(result.failed) > 0 ? ` (${result.failed} failed)` : "";
-    render({ ...settings, lastStatus: `ZIP download started: ${result.downloaded} images${failed}.` });
-  } else {
-    render({ ...settings, lastStatus: (result && result.error) || "ZIP download failed." });
+  } catch (error) {
+    const settings = await getSettings();
+    render({ ...settings, lastStatus: error.message || "ZIP download failed." });
+  } finally {
+    downloadZip.disabled = false;
   }
 });
 

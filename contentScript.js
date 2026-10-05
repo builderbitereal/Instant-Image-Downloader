@@ -21,6 +21,7 @@ let instantDebounce = null;
 let leftRunnerActive = false;
 let pickerActive = false;
 let pickerTarget = null;
+let batchRunnerActive = false;
 
 function storageGet(defaults) {
   return new Promise((resolve) => chrome.storage.local.get(defaults, resolve));
@@ -184,37 +185,235 @@ function collectBatchCandidates(root = document) {
 }
 
 function findFacebookPostRoot() {
-  if (!/(\.|^)facebook\.com$/i.test(location.hostname) && !/(\.|^)fb\.com$/i.test(location.hostname)) {
-    return null;
+  if (!isFacebookSite()) return null;
+
+  // A post popup takes precedence over larger photos in the feed behind it.
+  const dialogs = Array.from(document.querySelectorAll('[role="dialog"]')).reverse();
+  for (const dialog of dialogs) {
+    if (isVisible(dialog) && collectBatchCandidates(dialog).length) return dialog;
   }
 
-  const primary = getPrimaryImage();
-  let element = primary && primary.element;
-
+  let element = getPrimaryImage()?.element;
   while (element && element !== document.body) {
-    const role = element.getAttribute("role");
-    const dataPagelet = element.getAttribute("data-pagelet") || "";
-
-    if (role === "article" || role === "dialog" || dataPagelet.includes("FeedUnit")) {
-      const candidates = collectBatchCandidates(element);
-      if (candidates.length >= 2) {
-        return element;
-      }
+    const pagelet = element.getAttribute("data-pagelet") || "";
+    if (element.getAttribute("role") === "article" || pagelet.includes("FeedUnit")) {
+      return element;
     }
-
     element = element.parentElement;
   }
-
   return null;
 }
 
 function collectBatchImageList() {
-  const facebookRoot = findFacebookPostRoot();
-  const rootCandidates = facebookRoot ? collectBatchCandidates(facebookRoot) : [];
-  const documentCandidates = collectBatchCandidates(document);
-  const candidates = rootCandidates.length >= 2 ? rootCandidates : documentCandidates;
+  return collectBatchCandidates(findFacebookPostRoot() || document).slice(0, 200);
+}
 
-  return candidates.slice(0, 80);
+function isFacebookSite() {
+  return /(^|\.)facebook\.com$/i.test(location.hostname) || /(^|\.)fb\.com$/i.test(location.hostname);
+}
+
+function findPlusNOverlay(root = document) {
+  if (!isFacebookSite()) return null;
+  for (const element of root.querySelectorAll("div, span, a, [role='button']")) {
+    if (!isVisible(element)) continue;
+    const match = (element.textContent || "").trim().match(/^\+\s*(\d+)$/);
+    if (match && Number(match[1]) > 0) {
+      return { element, count: Number(match[1]) };
+    }
+  }
+  return null;
+}
+
+function isFacebookPhotoLink(element) {
+  try {
+    const url = new URL(element.href, location.href);
+    return /(^|\.)(facebook|fb)\.com$/i.test(url.hostname) &&
+      (/^\/photo(?:\.php|\/|$)/.test(url.pathname) || /\/photos\//.test(url.pathname));
+  } catch {
+    return false;
+  }
+}
+
+function facebookPhotoTiles(root) {
+  return Array.from(root.querySelectorAll("a[href]"))
+    .filter((link) => isFacebookPhotoLink(link) && link.querySelector("img"))
+    .filter((link) => Array.from(link.querySelectorAll("img")).some((img) => {
+      // Count every rendered tile, including previews above the viewport after scrolling.
+      const style = getComputedStyle(img);
+      const rect = img.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden" &&
+        Number(style.opacity) !== 0 && rect.width >= 90 && rect.height >= 90;
+    }));
+}
+
+function facebookImageKey(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    // CDN query strings and size directories change between thumbnail and viewer.
+    return /(^|\.)fbcdn\.net$/i.test(url.hostname)
+      ? url.pathname.split("/").pop()
+      : url.origin + url.pathname;
+  } catch {
+    return rawUrl;
+  }
+}
+
+function findFbPhotoViewerImage(initialImages = new Set()) {
+  const mediaRoot = document.querySelector('[data-pagelet="MediaViewerPhoto"]');
+  const photoLocation = /\/photo(?:\.php|\/|$)|\/photos\//.test(location.pathname);
+  const images = mediaRoot
+    ? mediaRoot.querySelectorAll("img")
+    : document.querySelectorAll('img[data-visualcompletion="media-vc-image"], [role="dialog"] img');
+  const candidates = [];
+  for (const img of images) {
+    if (!isVisible(img) || (!mediaRoot && !photoLocation && initialImages.has(img))) continue;
+    const rect = img.getBoundingClientRect();
+    const url = absoluteUrl(img.currentSrc || img.src);
+    if (rect.width < 200 || rect.height < 200 || !url || url.startsWith("blob:") ||
+        /emoji|static\.xx\.fbcdn\.net/.test(url) || img.complete === false || img.naturalWidth === 0) continue;
+    candidates.push({ url, element: img, area: rect.width * rect.height + (initialImages.has(img) ? 0 : 1e9) });
+  }
+  return candidates.sort((a, b) => b.area - a.area)[0] || null;
+}
+
+function findFbViewerControl(image, direction) {
+  const root = image?.element.closest('[role="dialog"]') || document;
+  const terms = direction === "next"
+    ? /\b(next(?: photo)?|right|forward)\b|\u09aa\u09b0\u09ac\u09b0\u09cd\u09a4\u09c0|\u09aa\u09b0\u09c7\u09b0|\u09a1\u09be\u09a8|\u0627\u0644\u062a\u0627\u0644\u064a/
+    : /\b(close|exit)\b|\u09ac\u09a8\u09cd\u09a7|\u0625\u063a\u0644\u0627\u0642/;
+  const candidates = Array.from(root.querySelectorAll('button, a, [role="button"]'));
+  return candidates.filter(visibleClickable).map((element) => {
+    // Class names, container text and geometry alone are not navigation controls.
+    const label = [element.getAttribute("aria-label"), element.getAttribute("title")]
+      .filter(Boolean).join(" ").toLowerCase();
+    const rect = element.getBoundingClientRect();
+    return { element, matches: terms.test(label), position: direction === "next" ? rect.left : -rect.top };
+  }).filter((item) => item.matches).sort((a, b) => b.position - a.position)[0]?.element || null;
+}
+
+function pressRightArrow(image) {
+  const button = findFbViewerControl(image, "next");
+  if (button) {
+    button.click();
+    return;
+  }
+  const target = image?.element.closest('[role="dialog"]') || document.activeElement || document;
+  // One bubbling event reaches document and window; sending to both can skip photos.
+  target.dispatchEvent(new KeyboardEvent("keydown", {
+    key: "ArrowRight", code: "ArrowRight", keyCode: 39, which: 39, bubbles: true, cancelable: true
+  }));
+  target.dispatchEvent(new KeyboardEvent("keyup", {
+    key: "ArrowRight", code: "ArrowRight", keyCode: 39, which: 39, bubbles: true, cancelable: true
+  }));
+}
+
+function closeFbPhotoViewer(image) {
+  const button = findFbViewerControl(image, "close");
+  if (button) {
+    button.click();
+    return;
+  }
+  (image?.element.closest('[role="dialog"]') || document).dispatchEvent(new KeyboardEvent("keydown", {
+    key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles: true, cancelable: true
+  }));
+}
+
+async function waitForFbPhoto(initialImages, previousKey = "", timeoutMs = WAIT_FOR_IMAGE_MS) {
+  const startedAt = Date.now();
+  let stableKey = "";
+  let stableSince = 0;
+  while (Date.now() - startedAt < timeoutMs) {
+    const image = findFbPhotoViewerImage(initialImages);
+    const key = image ? facebookImageKey(image.url) : "";
+    if (key && key !== previousKey) {
+      if (key !== stableKey) {
+        stableKey = key;
+        stableSince = Date.now();
+      } else if (Date.now() - stableSince >= 500) {
+        return image;
+      }
+    } else {
+      stableKey = "";
+    }
+    await sleep(200);
+  }
+  return null;
+}
+
+async function expandFacebookGallery(reportProgress) {
+  if (!isFacebookSite()) return null;
+  const root = findFacebookPostRoot() || document;
+  const overlay = findPlusNOverlay(root);
+  if (!overlay) return null;
+
+  const tiles = facebookPhotoTiles(root);
+  const visibleImages = collectBatchCandidates(root);
+  const tileCount = tiles.length || visibleImages.length;
+  if (!tileCount) throw new Error("Could not identify this post's photos. Open the post and try again.");
+  // The covered tile belongs to +N, so count only the uncovered preview tiles.
+  const expectedTotal = overlay.count + tileCount - 1;
+  if (expectedTotal > 200) throw new Error(`This post has ${expectedTotal} photos; the ZIP limit is 200.`);
+
+  const initialImages = new Set(document.querySelectorAll("img"));
+  const startTarget = tiles[0] || visibleImages[0] &&
+    Array.from(root.querySelectorAll("img")).find((img) => absoluteUrl(img.currentSrc || img.src) === visibleImages[0].url);
+  const clickTarget = startTarget?.closest('a, [role="button"]') || startTarget ||
+    overlay.element.closest('a, [role="button"]') || overlay.element;
+  await reportProgress?.(`Opening all ${expectedTotal} post photos...`);
+  clickTarget.click();
+
+  let image = await waitForFbPhoto(initialImages);
+  if (!image) {
+    throw new Error("Could not open the Facebook photo viewer. Open the post's first photo, return to the post and try again.");
+  }
+
+  const images = [];
+  const seen = new Set();
+  try {
+    while (images.length < expectedTotal) {
+      const key = facebookImageKey(image.url);
+      if (seen.has(key)) throw new Error(`Facebook returned to an earlier photo after ${images.length} of ${expectedTotal}. ZIP cancelled; try again.`);
+      seen.add(key);
+      images.push({ url: image.url, width: image.element.naturalWidth,
+        height: image.element.naturalHeight, top: images.length, left: 0, source: "gallery-expansion" });
+      await reportProgress?.(`Collecting post photos: ${images.length} of ${expectedTotal}...`);
+      if (images.length === expectedTotal) break;
+      pressRightArrow(image);
+      const next = await waitForFbPhoto(initialImages, key);
+      if (!next) throw new Error(`Facebook stopped loading at ${images.length} of ${expectedTotal} photos. ZIP cancelled; try again.`);
+      image = next;
+    }
+    return images;
+  } finally {
+    closeFbPhotoViewer(image);
+  }
+}
+
+async function collectAllBatchImages(reportProgress) {
+  const expanded = await expandFacebookGallery(reportProgress);
+  return expanded || collectBatchImageList();
+}
+
+async function runBatchZip() {
+  const pageUrl = location.href;
+  const pageTitle = document.title;
+  try {
+    const images = await collectAllBatchImages((lastStatus) => updateSettings({ lastStatus }));
+    if (!images.length) throw new Error("No batch images found on this page.");
+    await updateSettings({ lastStatus: `Creating ZIP from ${images.length} images...` });
+    // Run from the tab so closing the popup while Facebook loads cannot cancel the ZIP.
+    const result = await new Promise((resolve) => chrome.runtime.sendMessage({
+      type: "IID_DOWNLOAD_ZIP", payload: { images, pageUrl, pageTitle }
+    }, (response) => resolve(response || { ok: false, error: chrome.runtime.lastError?.message })));
+    if (!result.ok) throw new Error(result.error || "ZIP download failed.");
+    const failed = result.failed ? ` (${result.failed} failed)` : "";
+    await updateSettings({ lastStatus: `ZIP download started: ${result.downloaded} images${failed}.` });
+  } catch (error) {
+    await updateSettings({ lastStatus: error.message || "ZIP download failed." });
+  } finally {
+    batchRunnerActive = false;
+    await applyInstantMode();
+  }
 }
 
 function scoreImage(candidate) {
@@ -287,7 +486,7 @@ function scheduleInstantDownload() {
   clearTimeout(instantDebounce);
   instantDebounce = setTimeout(async () => {
     const settings = await getSettings();
-    if (!settings.instantEnabled || settings.leftEnabled) return;
+    if (batchRunnerActive || !settings.instantEnabled || settings.leftEnabled) return;
 
     const image = await waitForPrimaryImage(1500);
     await requestDownload(image, "instant");
@@ -304,7 +503,7 @@ async function applyInstantMode() {
 
   clearTimeout(instantDebounce);
 
-  if (!settings.instantEnabled || settings.leftEnabled) {
+  if (batchRunnerActive || !settings.instantEnabled || settings.leftEnabled) {
     return;
   }
 
@@ -392,13 +591,13 @@ async function waitForImageChange(previousKey, timeoutMs = WAIT_FOR_CHANGE_MS) {
 }
 
 async function runLeftMode() {
-  if (leftRunnerActive) return;
+  if (leftRunnerActive || batchRunnerActive) return;
   leftRunnerActive = true;
 
   try {
     while (true) {
       let settings = await getSettings();
-      if (!settings.leftEnabled) break;
+      if (!settings.leftEnabled || batchRunnerActive) break;
 
       const hasLimit = Number(settings.leftLimit) > 0;
       if (hasLimit && Number(settings.leftRemaining) <= 0) {
@@ -547,8 +746,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
+    if (message.type === "IID_START_BATCH_ZIP") {
+      if (batchRunnerActive || leftRunnerActive) {
+        sendResponse({ ok: false, error: "A download run is already active. Stop it before starting another ZIP." });
+        return;
+      }
+      batchRunnerActive = true;
+      stopPicker();
+      await applyInstantMode();
+      await updateSettings({ lastStatus: "Finding all post photos..." });
+      sendResponse({ ok: true });
+      void runBatchZip();
+      return;
+    }
+
     if (message.type === "IID_COLLECT_BATCH_IMAGES") {
-      const images = collectBatchImageList();
+      const images = await collectAllBatchImages(async (statusMsg) => {
+        await updateSettings({ lastStatus: statusMsg });
+      });
       await updateSettings({
         lastStatus: images.length ? `Found ${images.length} images for ZIP.` : "No batch images found on this page."
       });
@@ -573,7 +788,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     sendResponse({ ok: false });
-  })();
+  })().catch(async (error) => {
+    await updateSettings({ lastStatus: error.message || "Download failed." });
+    sendResponse({ ok: false, error: error.message || "Download failed." });
+  });
 
   return true;
 });

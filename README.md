@@ -15,7 +15,7 @@ If this extension helps your workflow, please star the repository. It helps othe
 ## Features
 
 - Instant Download: detects the main visible image on a page and starts a download automatically.
-- Download All Post Images as ZIP: detects visible batch/gallery images, keeps their visual order, and downloads them in one ZIP file.
+- Download All Post Images as ZIP: downloads Facebook post photos, including those hidden behind a +N tile, by stepping through the photo viewer before creating one ordered ZIP (up to 200 photos). Other pages use visible batch images.
 - Left Arrow Option Enabled: downloads the current image, performs the page's left-arrow action, then repeats.
 - Limit support: set a maximum number of left-arrow download cycles, or leave it empty for unlimited until stopped.
 - Manual Download Current Image: downloads the largest visible image on the current page.
@@ -33,11 +33,11 @@ If this extension helps your workflow, please star the repository. It helps othe
 
 Open a page with images, click the extension icon, and choose one of the available actions.
 
-For Facebook batch posts, open the public post or gallery first, make sure the images are visible on the page, then click `Download All Post Images as ZIP`.
+For Facebook batch posts, open the post so its photo grid is visible, then click `Download All Post Images as ZIP`. The extension opens the first photo and collects the full post, including photos behind a `+N` tile. Keep the Facebook tab open and avoid navigating or clicking the viewer while collection runs. You can close the extension popup and reopen it to see progress. If Facebook stops loading before the expected count, the extension reports an error instead of silently downloading only the previews.
 
 ## Important Notes
 
-- This extension only downloads images that are visible and accessible in your browser.
+- This extension downloads images accessible in your browser, including Facebook photos loaded by navigating the post viewer.
 - It does not bypass Facebook privacy, login, permission, paywall, or site access restrictions.
 - Browser download behavior still follows Edge download settings. If Edge asks where to save every file, the browser may show that prompt.
 - Some sites block direct image downloads or use temporary `blob:` URLs. Those images may not be downloadable through the browser downloads API.

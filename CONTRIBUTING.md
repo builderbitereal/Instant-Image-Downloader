@@ -18,6 +18,7 @@ Run these before opening a pull request:
 node --check background.js
 node --check contentScript.js
 node --check popup.js
+node --test tests/facebook-gallery.test.js
 Get-Content -Raw manifest.json | ConvertFrom-Json | Out-Null
 ```
 
